@@ -134,8 +134,7 @@ async function loadData({ reason = "manual" } = {}) {
     let details = { columns: [], rows: [] };
 
     try {
-      const campaignJson = await loadSheetJsonp(DETAIL_SHEET, "select I,J where I is not null", 3);
-      const campaignLookup = rowsFromCampaignLookup(campaignJson);
+      const campaignLookup = await loadCampaignLookup();
       state.campaignLabels = buildCampaignLabels(campaignLookup.rows, campaignLookup.fields);
       state.campaignOptions = uniqueValues(campaignLookup.rows, campaignLookup.fields.campaign);
     } catch (campaignError) {
@@ -164,7 +163,7 @@ async function loadData({ reason = "manual" } = {}) {
       const detailLabels = buildCampaignLabels(state.detailRows, state.detailFields);
       if (detailLabels.size > state.campaignLabels.size) state.campaignLabels = detailLabels;
       const detailCampaigns = uniqueValues(state.detailRows, state.detailFields.campaign);
-      if (detailCampaigns.length > state.campaignOptions.length) state.campaignOptions = detailCampaigns;
+      state.campaignOptions = mergeUniqueValues(state.campaignOptions, detailCampaigns);
     }
 
     debugLoadedData(parsed);
@@ -214,9 +213,9 @@ function stopRealtimeRefresh() {
   }
 }
 
-function loadSheetJsonp(sheetName = PRIMARY_SHEET, query = "", headers = null) {
+function loadSheetJsonp(sheetName = PRIMARY_SHEET, query = "", headers = null, range = "") {
   return new Promise((resolve, reject) => {
-    const callback = "dailyDataCallback_" + Date.now();
+    const callback = "dailyDataCallback_" + Date.now() + "_" + Math.random().toString(36).slice(2);
     const script = document.createElement("script");
     const cleanup = () => {
       delete window[callback];
@@ -240,6 +239,7 @@ function loadSheetJsonp(sheetName = PRIMARY_SHEET, query = "", headers = null) {
     let source = "https://docs.google.com/spreadsheets/d/" + SPREADSHEET_ID + "/gviz/tq?sheet=" + encodeSheetName(sheetName) + "&tqx=out:json;responseHandler:" + callback + "&cacheBust=" + Date.now();
     if (query) source += "&tq=" + encodeGvizParam(query);
     if (headers !== null) source += "&headers=" + encodeGvizParam(headers);
+    if (range) source += "&range=" + encodeGvizParam(range);
     script.src = source;
     document.head.appendChild(script);
   });
@@ -267,13 +267,49 @@ function rowsFromGviz(json) {
   return { columns, rows };
 }
 
+async function loadCampaignLookup() {
+  const fields = { campaign: "Campaign ID", campaignName: "Campaign Name" };
+  const allRows = [];
+  const seen = new Set();
+  const chunkSize = 1000;
+  const maxRows = 12000;
+
+  for (let start = 1; start <= maxRows; start += chunkSize) {
+    const end = start + chunkSize - 1;
+    const json = await loadSheetJsonp(DETAIL_SHEET, "", 0, "I" + start + ":J" + end);
+    const parsed = rowsFromCampaignLookup(json);
+    const newRows = parsed.rows.filter((row) => {
+      const id = row[fields.campaign];
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    allRows.push(...newRows);
+    if (!parsed.rows.length || parsed.rows.length < chunkSize * 0.2) break;
+  }
+
+  debugLog("Campaign lookup loaded", {
+    campaignCount: allRows.length,
+    sample: allRows.slice(0, 10),
+  });
+  return { columns: ["Campaign ID", "Campaign Name"], rows: allRows, fields };
+}
+
 function rowsFromCampaignLookup(json) {
   const columns = ["Campaign ID", "Campaign Name"];
   const rows = json.table.rows.map((row) => {
-    const id = row.c[0] ? row.c[0].f ?? row.c[0].v ?? "" : "";
-    const name = row.c[1] ? row.c[1].f ?? row.c[1].v ?? "" : "";
-    return { "Campaign ID": id, "Campaign Name": name };
-  }).filter((row) => String(row["Campaign ID"] || "").trim());
+    const cells = row.c || [];
+    const id = cells[0] ? cells[0].f ?? cells[0].v ?? "" : "";
+    const name = cells[1] ? cells[1].f ?? cells[1].v ?? "" : "";
+    return { "Campaign ID": String(id || "").trim(), "Campaign Name": String(name || "").trim() };
+  }).filter((row) => {
+    const id = row["Campaign ID"];
+    const name = row["Campaign Name"];
+    if (!id) return false;
+    if (normalize(id) === "campaignid" || normalize(name) === "campaignname") return false;
+    if (id.toLowerCase().startsWith("column")) return false;
+    return true;
+  });
   return { columns, rows, fields: { campaign: "Campaign ID", campaignName: "Campaign Name" } };
 }
 
@@ -405,7 +441,7 @@ function populateCampaignFilter() {
   const campaignField = state.detailFields.campaign || state.fields.campaign;
   const campaignRows = state.detailFields.campaign ? state.detailRows : state.rawRows;
   const rowCampaigns = uniqueValues(campaignRows, campaignField);
-  const allCampaigns = mergeUniqueValues(state.campaignOptions, rowCampaigns);
+  const allCampaigns = sortCampaigns(mergeUniqueValues(state.campaignOptions, rowCampaigns));
   const search = state.filters.campaignSearch || "";
   const filtered = allCampaigns.filter((campaign) => {
     const value = String(campaign || "").toLowerCase();
@@ -417,14 +453,17 @@ function populateCampaignFilter() {
   els.campaignFilter.value = filtered.includes(state.filters.campaign) ? state.filters.campaign : OVERALL;
 }
 
-function mergeUniqueValues(primary, secondary) {
+function mergeUniqueValues(primary = [], secondary = []) {
   const seen = new Set();
-  return [...primary, ...secondary].filter((value) => {
-    const clean = String(value || "").trim();
-    if (!clean || seen.has(clean)) return false;
-    seen.add(clean);
+  return [...primary, ...secondary].map((value) => String(value || "").trim()).filter((value) => {
+    if (!value || normalize(value) === "campaignid" || seen.has(value)) return false;
+    seen.add(value);
     return true;
   });
+}
+
+function sortCampaigns(values) {
+  return [...values].sort((a, b) => getCampaignLabel(a).localeCompare(getCampaignLabel(b), undefined, { numeric: true }));
 }
 
 function populateOptionFilter(select, values, key) {
@@ -435,7 +474,8 @@ function populateOptionFilter(select, values, key) {
 
 function populateSelect(select, values, overallLabel, labelFormatter = (value) => value) {
   select.innerHTML = "";
-  [overallLabel, ...values].forEach((value) => {
+  const cleanValues = mergeUniqueValues(values, []);
+  [overallLabel, ...cleanValues].forEach((value) => {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = value === overallLabel ? overallLabel : labelFormatter(value);
@@ -449,7 +489,7 @@ function buildCampaignLabels(rows, fields) {
   rows.forEach((row) => {
     const id = String(row[fields.campaign] || "").trim();
     const name = fields.campaignName ? String(row[fields.campaignName] || "").trim() : "";
-    if (id && name && !labels.has(id)) labels.set(id, name);
+    if (id && normalize(id) !== "campaignid" && name && normalize(name) !== "campaignname" && !labels.has(id)) labels.set(id, name);
   });
   return labels;
 }
