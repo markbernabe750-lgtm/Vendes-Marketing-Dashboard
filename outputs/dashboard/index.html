@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Business Analytics Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Dashboard navigation">
+        <div class="brand"><div class="brand-mark">BA</div><div><strong>Business Analytics</strong><span>Daily performance</span></div></div>
+        <nav class="nav-list" aria-label="Main sections"><a class="active" href="#overview">Overview</a><a href="#trends">Trends</a><a href="#table">Daily Data</a></nav>
+        <div class="source-note"><span class="status-dot" id="sourceDot"></span><span id="sourceStatus">Connecting to spreadsheet</span></div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div><p class="eyebrow">Live spreadsheet dashboard</p><h1>Overall Performance</h1><p class="subtitle" id="lastUpdated">Reading Daily Data...</p></div>
+          <div class="top-actions"><span class="realtime-chip" id="realtimeStatus">Auto-refresh on</span><button class="icon-button" id="themeToggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><span id="themeIcon">◐</span></button><button class="secondary-button" id="refreshButton" type="button">Refresh</button><button class="primary-button" id="exportButton" type="button">Export Table</button></div>
+        </header>
+        <section class="filters" aria-label="Dashboard filters">
+          <label><span>Campaign ID / Name</span><input id="campaignSearch" type="search" placeholder="Search campaign ID or name" autocomplete="off" /><select id="campaignFilter"></select></label>
+          <label><span>Date From</span><input id="dateFrom" type="date" /></label>
+          <label><span>Date To</span><input id="dateTo" type="date" /></label>
+          <label id="storeFilterWrap" hidden><span>Store</span><select id="storeFilter"></select></label>
+          <label id="regionFilterWrap" hidden><span>Region / Area</span><select id="regionFilter"></select></label>
+        </section>
+        <section id="overview" class="kpi-grid" aria-label="Key performance indicators"></section>
+        <section id="trends" class="chart-grid">
+          <article class="panel large"><div class="panel-head"><div><h2>Daily Sales Trend</h2><p>Sales amount by date</p></div></div><div class="chart" id="salesTrendChart"></div></article>
+          <article class="panel large"><div class="panel-head"><div><h2>Daily ADS Trend</h2><p>ADS quantity by date</p></div></div><div class="chart" id="adsTrendChart"></div></article>
+          <article class="panel"><div class="panel-head"><div><h2>Sales by Campaign</h2><p>Filtered sales contribution</p></div></div><div class="chart" id="campaignChart"></div></article>
+          <article class="panel"><div class="panel-head"><div><h2>Top Performing Stores</h2><p>Highest sales stores</p></div></div><div class="chart" id="storesChart"></div></article>
+          <article class="panel"><div class="panel-head"><div><h2>Top Selling Products</h2><p>Highest sales products</p></div></div><div class="chart" id="productsChart"></div></article>
+        </section>
+        <section id="table" class="panel table-panel"><div class="panel-head table-head"><div><h2>Daily Performance</h2><p id="rowCount">No rows loaded yet</p></div><button class="secondary-button" id="printButton" type="button">Export PDF</button></div><div class="table-wrap"><table><thead id="tableHead"></thead><tbody id="tableBody"></tbody><tfoot id="tableFoot"></tfoot></table></div></section>
+      </main>
+    </div>
+    <div class="loader" id="loader"><div class="spinner"></div><strong>Loading spreadsheet data</strong><span>Reading the Daily Data sheet...</span></div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <dialog id="drilldownDialog"><div class="dialog-head"><div><p class="eyebrow">Drill-down</p><h2 id="drilldownTitle">Details</h2></div><button class="icon-button" id="closeDialog" type="button" aria-label="Close" title="Close">x</button></div><div id="drilldownBody"></div></dialog>
+    <script src="./app.js"></script>
+  </body>
+</html>
