@@ -14,6 +14,7 @@ const state = {
   detailColumns: [],
   detailFields: {},
   campaignLabels: new Map(),
+  campaignOptions: [],
   activeSource: "daily",
   hasLoaded: false,
   refreshTimer: null,
@@ -134,8 +135,9 @@ async function loadData({ reason = "manual" } = {}) {
 
     try {
       const campaignJson = await loadSheetJsonp(DETAIL_SHEET, "select I,J where I is not null", 3);
-      const campaignLookup = rowsFromGviz(campaignJson);
-      state.campaignLabels = buildCampaignLabels(campaignLookup.rows, detectFields(campaignLookup.columns));
+      const campaignLookup = rowsFromCampaignLookup(campaignJson);
+      state.campaignLabels = buildCampaignLabels(campaignLookup.rows, campaignLookup.fields);
+      state.campaignOptions = uniqueValues(campaignLookup.rows, campaignLookup.fields.campaign);
     } catch (campaignError) {
       console.warn("Could not refresh campaign name lookup", campaignError);
     }
@@ -160,7 +162,9 @@ async function loadData({ reason = "manual" } = {}) {
       state.detailRows = details.rows;
       state.detailFields = detectFields(state.detailColumns);
       const detailLabels = buildCampaignLabels(state.detailRows, state.detailFields);
-      if (detailLabels.size) state.campaignLabels = detailLabels;
+      if (detailLabels.size > state.campaignLabels.size) state.campaignLabels = detailLabels;
+      const detailCampaigns = uniqueValues(state.detailRows, state.detailFields.campaign);
+      if (detailCampaigns.length > state.campaignOptions.length) state.campaignOptions = detailCampaigns;
     }
 
     debugLoadedData(parsed);
@@ -168,7 +172,7 @@ async function loadData({ reason = "manual" } = {}) {
     console.info("Campaign dropdown options", {
       campaignField: state.detailFields.campaign || state.fields.campaign || null,
       campaignNameField: state.detailFields.campaignName || (state.campaignLabels.size ? "Campaign Name" : null),
-      campaignCount: uniqueValues(state.detailFields.campaign ? state.detailRows : state.rawRows, state.detailFields.campaign || state.fields.campaign).length || state.campaignLabels.size,
+      campaignCount: state.campaignOptions.length || uniqueValues(state.detailFields.campaign ? state.detailRows : state.rawRows, state.detailFields.campaign || state.fields.campaign).length || state.campaignLabels.size,
       sampleLabels: Array.from(state.campaignLabels.entries()).slice(0, 5).map(([id, name]) => id + " - " + name),
     });
     applyFilterDefaults(previousFilters);
@@ -261,6 +265,16 @@ function rowsFromGviz(json) {
     return item;
   });
   return { columns, rows };
+}
+
+function rowsFromCampaignLookup(json) {
+  const columns = ["Campaign ID", "Campaign Name"];
+  const rows = json.table.rows.map((row) => {
+    const id = row.c[0] ? row.c[0].f ?? row.c[0].v ?? "" : "";
+    const name = row.c[1] ? row.c[1].f ?? row.c[1].v ?? "" : "";
+    return { "Campaign ID": id, "Campaign Name": name };
+  }).filter((row) => String(row["Campaign ID"] || "").trim());
+  return { columns, rows, fields: { campaign: "Campaign ID", campaignName: "Campaign Name" } };
 }
 
 function rowsFromGeneralData(json) {
@@ -390,15 +404,27 @@ function populateFilters() {
 function populateCampaignFilter() {
   const campaignField = state.detailFields.campaign || state.fields.campaign;
   const campaignRows = state.detailFields.campaign ? state.detailRows : state.rawRows;
-  const allCampaigns = uniqueValues(campaignRows, campaignField);
+  const rowCampaigns = uniqueValues(campaignRows, campaignField);
+  const allCampaigns = mergeUniqueValues(state.campaignOptions, rowCampaigns);
   const search = state.filters.campaignSearch || "";
   const filtered = allCampaigns.filter((campaign) => {
+    const value = String(campaign || "").toLowerCase();
     const label = getCampaignLabel(campaign).toLowerCase();
-    return campaign.toLowerCase().includes(search) || label.includes(search);
+    return value.includes(search) || label.includes(search);
   });
   populateSelect(els.campaignFilter, filtered, OVERALL, getCampaignLabel);
   if (![OVERALL, ...allCampaigns].includes(state.filters.campaign)) state.filters.campaign = OVERALL;
   els.campaignFilter.value = filtered.includes(state.filters.campaign) ? state.filters.campaign : OVERALL;
+}
+
+function mergeUniqueValues(primary, secondary) {
+  const seen = new Set();
+  return [...primary, ...secondary].filter((value) => {
+    const clean = String(value || "").trim();
+    if (!clean || seen.has(clean)) return false;
+    seen.add(clean);
+    return true;
+  });
 }
 
 function populateOptionFilter(select, values, key) {
